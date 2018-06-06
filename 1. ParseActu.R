@@ -112,7 +112,9 @@ parsedSitemapActu$isFlash <- grepl(pattern = "Flash", x = parsedSitemapActu$keyw
 parsedSitemapActu <- parsedSitemapActu[parsedSitemapActu$isFlash == FALSE,]
 parsedSitemapActu <- subset(parsedSitemapActu, select = -c(isFlash))
 
-write.csv(parsedSitemapActu, "data/ParsedSitemapActu.csv")
+
+fileName <- paste("data/ParsedSitemapActu-", Sys.Date(), ".csv", sep = "")
+write.csv(parsedSitemapActu, fileName)
 
 
 

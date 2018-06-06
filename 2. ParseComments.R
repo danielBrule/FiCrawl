@@ -19,7 +19,8 @@ setwd("C:/FiCrawl")
 ####################################################################################
 ####################################################################################
 
-parsedSitemapActu <- read.csv("data/ParsedSitemapActu.csv")
+fileName <- paste("data/ParsedSitemapActu-", Sys.Date()-1, ".csv", sep = "")
+parsedSitemapActu <- read.csv("data/ParsedSitemapActu-.csv")
 #todo : get info from DB
 
 ####################################################################################
@@ -183,3 +184,6 @@ end_time <- Sys.time()
 end_time - start_time
 
 
+fileName <- paste("data/comments-", Sys.Date(), ".csv", sep = "")
+
+write.csv(output, fileName)
