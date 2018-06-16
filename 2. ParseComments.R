@@ -20,7 +20,7 @@ setwd("C:/FiCrawl")
 ####################################################################################
 
 fileName <- paste("data/ParsedSitemapActu-", Sys.Date()-1, ".csv", sep = "")
-parsedSitemapActu <- read.csv("data/ParsedSitemapActu-.csv")
+parsedSitemapActu <- read.csv(fileName)
 #todo : get info from DB
 
 ####################################################################################
@@ -41,14 +41,22 @@ f_buildCommentURL<- function(ID, pageID){
 
 f_parseCommentContentNode <- function(node, parentID){
     #node <- curNode
+    # node <- xml_child(nodeAnswer,3)
     #parentID <- 0
     
     #comment ID 
     commentID <- xml_attr(node, "class")
     commentID <-strsplit(commentID, split= " ")[[1]][2]
     
-    nodeCommentContent <- xml_children(node)[[2]]
+    isJournalisteAttribute <- xml_attr(xml_children(node), "class")[1]
     
+    if(isJournalisteAttribute == "fig-comment__journalist-wrapper"){
+        nodeCommentContent <- xml_children(xml_children(node)[[1]])[[2]]
+        isJournaliste <- TRUE
+    } else{
+        nodeCommentContent <- xml_children(node)[[2]]
+        isJournaliste <- FALSE
+    }
     #user Info
     nodeUser <- xml_child(nodeCommentContent, 1)
     userID <- xml_attr(nodeUser, "href")
@@ -71,10 +79,12 @@ f_parseCommentContentNode <- function(node, parentID){
         comment = as.character(), 
         parentComment = as.character(), 
         dateComment = as.character(),
+        isJournaliste = as.character(),
         stringsAsFactors = FALSE
     )
+    
     output <- rbind(output, 
-                    setNames(data.frame(commentID, userID, comment, parentID, dateComment),
+                    setNames(data.frame(commentID, userID, comment, parentID, dateComment, isJournaliste),
                              names(output)))
     
     if (xml_length(node) == 3){
@@ -92,6 +102,7 @@ f_parseCommentContentNode <- function(node, parentID){
 
 f_parseJsonComments <- function (jsonNode){
     #jsonNode <- fromJSON(file = "data/Comment.json")[[2]]
+    #jsonNode <- data[[2]]
     
     html <- read_html(jsonNode)
     nodes <- xml_child(html)
@@ -103,6 +114,7 @@ f_parseJsonComments <- function (jsonNode){
         comment = as.character(), 
         parentComment = as.character(), 
         dateComment = as.character(),
+        isJournaliste = as.character(),
         stringsAsFactors = FALSE
     )
     
@@ -115,7 +127,8 @@ f_parseJsonComments <- function (jsonNode){
 }
 
 f_getComments<- function(ID){
-    # ID <- "20180604ARTFIG00006"
+    # ID <- "20180607ARTFIG00353"
+    #ID <- articleID
     url <- f_buildCommentURL(ID, 0)
     
     #todo read json online 
@@ -131,6 +144,7 @@ f_getComments<- function(ID){
         comment = as.character(), 
         parentComment = as.character(), 
         dateComment = as.character(),
+        isJournaliste = as.character(),
         stringsAsFactors = FALSE
     )
     
@@ -173,7 +187,8 @@ output <- data.frame(
 
 start_time <- Sys.time()
 for (i in 1:nrow(parsedSitemapActu)){
-    articleID <- parsedSitemapActu[i,]$ID
+    articleID <-  parsedSitemapActu[i,]$ID
+#    articleID <- "20180607ARTFIG00353"
     output <- rbind(output, 
                     f_getComments(articleID))
     print(i)
@@ -184,6 +199,6 @@ end_time <- Sys.time()
 end_time - start_time
 
 
-fileName <- paste("data/comments-", Sys.Date(), ".csv", sep = "")
+fileName <- paste("data/comments-", Sys.Date()-1, ".csv", sep = "")
 
 write.csv(output, fileName)
