@@ -221,7 +221,7 @@ f_updateExistingArticle <- function(exitingArticle){
     }
     for (i in 1:nrow(exitingArticle)){
         query <- paste(
-            'UPDATE  articles set ',
+            'UPDATE  articles set HasBeenParsed = 0, ',
             'LastModificationDate = ' , 
             '"', as.POSIXlt(as.numeric(exitingArticle$modificationTime[i]), origin = "1970-01-01"), '" ',
             "where articleID = ",

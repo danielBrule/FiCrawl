@@ -258,7 +258,7 @@ write.csv(output, fileName)
 ####################################################################################
 ####################################################################################
 
-#output <- read.csv("data/comments-2018-06-15.csv")
+#output <- read.csv("data/comments-2018-06-18.csv")
 #output$hasChild <- FALSE
 
 
@@ -306,7 +306,7 @@ f_updateComments <- function(output){
 }
 
 
-output <- unique(output[,2:9])
+output <- unique(output)
 
 connect <- odbcConnect("FiCrawl")
 f_updateUsers(output)
