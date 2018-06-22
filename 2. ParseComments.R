@@ -191,6 +191,7 @@ f_getComments<- function(ID){
 ############################  Initialisation    ####################################
 ####################################################################################
 ####################################################################################
+fileName <- paste("data/comments-", Sys.Date()-1, ".csv", sep = "")
 
 
 output <- data.frame(
@@ -241,7 +242,6 @@ close(connect)
 
 
 
-fileName <- paste("data/comments-", Sys.Date()-1, ".csv", sep = "")
 
 write.csv(output, fileName)
 
