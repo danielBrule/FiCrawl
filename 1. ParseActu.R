@@ -102,7 +102,6 @@ f_parseSitemapActu <- function(rootNode){
 
 rootNode <- read_xml(destFullPath)
 ns <- xml_ns_rename(xml_ns(rootNode), d1 = "a")
-#rootNode <- getNodeSet(rootNode, "//urlset")
 parsedSitemapActu <- f_parseSitemapActu(rootNode)
 
 remove(list=c("rootNode","ns", "f_parseSitemapActu","destFullPath"))
@@ -141,27 +140,41 @@ f_insertError <- function(query, exitValue, id, i){
 f_cleanKeyword <- function(keyword){
     keywords <- tolower(keyword)
     keywords <- unlist(strsplit(keywords, ','))
-    for (i in 1:length(keywords)){
-        tmp <- iconv(keywords[i],from="UTF-8",to="ASCII//TRANSLIT")
+    keywords <- data.frame(keyword = keywords, 
+                           keywordStem =trimws(keywords),
+                           stringsAsFactors = FALSE)
+    if (nrow(keywords) == 0){
+        return(NULL)
+    }
+    for (i in 1:nrow(keywords)){
+        tmp <- iconv(keywords$keywordStem[i],from="UTF-8",to="ASCII//TRANSLIT")
+        if(is.na(tmp)){
+            tmp <- iconv(keywords$keywordStem[i],from="",to="ASCII//TRANSLIT")
+        }
         tmp <- strsplit(tmp, ' ')
         tmp <- sapply(tmp, wordStem, language = "french")
-        keywords[i] <- paste(tmp, collapse = " ")
+        keywords$keywordStem[i] <- paste(tmp, collapse = " ")
     }
-    keywords <- unique(keywords)
-    keywords <- sort(keywords)
+    keywords <- keywords [!duplicated(keywords[,c('keywordStem')]),]
+    keywords <- keywords[order(keywords$keywordStem), ]
     return(keywords)
 }
 
-f_updateKeyword <- function(parsedSitemapActu){
+f_updateKeyword <- function(parsedSitemapActu, connect){
     keywords <- f_cleanKeyword(paste(parsedSitemapActu$keywords, collapse =","))
-    
-    existingKeywords <- sort(sqlQuery(connect, "select * from keywords")$KeywordID)
+
+    existingKeywords <- sqlQuery(connect, "select * from keywords")
+    existingKeywords <- existingKeywords[order(existingKeywords$KeywordID), ]
     '%nin%' <- Negate('%in%')
-    keywords <- keywords[keywords %nin% existingKeywords]
-    if (length(keywords) > 1 ){
-        for (i in 1:length(keywords)){
-            if (keywords[i] != "NA"){
-                query <- paste('insert into keywords (KeywordID) values ("' , keywords[i],'")', sep = '')
+    keywords <- keywords[keywords$keywordStem %nin% existingKeywords$KeywordID, ]
+    if (nrow(keywords) > 1 ){
+        for (i in 1:nrow(keywords)){
+            if (keywords$keyword[i] != "NA"){
+                query <- paste('insert into keywords (KeywordID, FullKeyword) values (', 
+                               '"', keywords$keywordStem[i],'",',
+                               '"', keywords$keyword[i],'"', 
+                               ')', 
+                               sep = '')
                 exitValue <- sqlQuery(connect, query)
                 if (!identical(exitValue, character(0))){
                     f_insertError(query, exitValue, 1, i)              
@@ -172,7 +185,7 @@ f_updateKeyword <- function(parsedSitemapActu){
 }
 
 
-f_updateNewArticle <- function(newArticle){
+f_updateNewArticle <- function(newArticle, connect){
     if (nrow(newArticle) == 0){
         return()
     }
@@ -194,18 +207,19 @@ f_updateNewArticle <- function(newArticle){
             f_insertError(query, exitValue, 2, i)
         }
         keywords <- f_cleanKeyword(newArticle$keywords[i])
-        
-        for (j in 1:length(keywords)){
-            if (keywords[j] != "NA"){
-                query <- paste(
-                    'insert into articlekeywords (ArticleID, keywordid) values (' , 
-                    '"', newArticle$ID[i],'",', 
-                    '"', keywords[j], '"', 
-                    ')',
-                    sep = '')
-                exitValue <- sqlQuery(connect, query)
-                if (!identical(exitValue, character(0))){
-                    f_insertError(query, exitValue, 3, paste(i, j))
+        if (!is.null(keywords)){
+            for (j in 1:nrow(keywords)){
+                if (keywords$keywordStem[j] != "NA"){
+                    query <- paste(
+                        'insert into articlekeywords (ArticleID, keywordid) values (' , 
+                        '"', newArticle$ID[i],'",', 
+                        '"', keywords$keywordStem[j], '"', 
+                        ')',
+                        sep = '')
+                    exitValue <- sqlQuery(connect, query)
+                    if (!identical(exitValue, character(0))){
+                        f_insertError(query, exitValue, 3, paste(i, j))
+                    }
                 }
             }
             
@@ -215,7 +229,7 @@ f_updateNewArticle <- function(newArticle){
 
 }
 
-f_updateExistingArticle <- function(exitingArticle){
+f_updateExistingArticle <- function(exitingArticle, connect){
     if (nrow(exitingArticle) == 0){
         return()
     }
@@ -235,25 +249,39 @@ f_updateExistingArticle <- function(exitingArticle){
     }
 }
 
-f_updateArticle <- function(parsedSitemapActu, connection){
+f_updateArticle <- function(parsedSitemapActu, connect){
     existingArticlesID <- sqlQuery(connect, "select articleID from articles")$articleID
     '%nin%' <- Negate('%in%')
     newArticle <- parsedSitemapActu[parsedSitemapActu$ID %nin% existingArticlesID, ]
     exitingArticle <- parsedSitemapActu[parsedSitemapActu$ID %in% existingArticlesID, ]
-    f_updateNewArticle(newArticle)
-    f_updateExistingArticle(exitingArticle)
+    f_updateNewArticle(newArticle, connect)
+    f_updateExistingArticle(exitingArticle, connect)
 }
 
 #parsedSitemapActu <- read.csv("data/ParsedSitemapActu-2018-06-18.csv")
 
+f_updateDB <- function (parsedSitemapActu, connect){
+    connect <- odbcConnect("FiCrawl")
+    f_updateKeyword(parsedSitemapActu, connect) 
+    f_updateArticle(parsedSitemapActu, connect)
+    close(connect)
+}
 
-connect <- odbcConnect("FiCrawl")
-f_updateKeyword(parsedSitemapActu) 
-f_updateArticle(parsedSitemapActu, connection)
-
-close(connect)
+f_updateDB(parsedSitemapActu)
 
 
+f_parseDic(){
+    files <- list.files("./data")
+    files <- files[grep("ParsedSitemapActu.*", files)]
+    
+    for (i in 1:length(files)){
+        print(i)
+        fileName <- paste("./data/", files[i], sep="")
+        parsedSitemapActu <- read.csv (fileName)
+        f_updateDB(read.csv (fileName))
+    }
+
+}
 
 
 

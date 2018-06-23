@@ -2,17 +2,18 @@ CREATE DATABASE `ficrawl` /*!40100 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4
 
 
 CREATE TABLE `keywords` (
-  `KeywordID` char(50) NOT NULL,
+  `KeywordID` char(200) NOT NULL,
+  `FullKeyword` varchar(200) NOT NULL,
   PRIMARY KEY (`KeywordID`),
   UNIQUE KEY `KeywordID_UNIQUE` (`KeywordID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 
 
 CREATE TABLE `users` (
   `UserID` varchar(150) NOT NULL,
   PRIMARY KEY (`UserID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 
 
 CREATE TABLE `articles` (
@@ -28,6 +29,7 @@ CREATE TABLE `articles` (
 
 
 
+
 CREATE TABLE `articlekeywords` (
   `ArticleID` varchar(19) NOT NULL,
   `KeywordID` char(50) NOT NULL,
@@ -38,12 +40,14 @@ CREATE TABLE `articlekeywords` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
+
 CREATE TABLE `comments` (
   `CommentId` int(11) NOT NULL,
   `Comment` varchar(2000) NOT NULL,
   `CommentDate` datetime NOT NULL,
   `IsJournaliste` tinyint(4) NOT NULL,
   `HasChild` tinyint(4) NOT NULL,
+  `Sentiment` int(11) NOT NULL,
   `UserId` varchar(150) NOT NULL,
   `ArticleID` varchar(19) NOT NULL,
   `ParentCommentId` int(11) DEFAULT NULL,
@@ -55,3 +59,4 @@ CREATE TABLE `comments` (
   CONSTRAINT `ParentID` FOREIGN KEY (`ParentCommentId`) REFERENCES `comments` (`commentid`),
   CONSTRAINT `UserId` FOREIGN KEY (`UserId`) REFERENCES `users` (`userid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+

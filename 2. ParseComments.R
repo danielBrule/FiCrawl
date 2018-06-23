@@ -10,19 +10,11 @@ if (!require(rjson)){
 
 library(xml2)
 library(RODBC)
+library(syuzhet)
 
 setwd("C:/FiCrawl")
 
 
-####################################################################################
-####################################################################################
-############################  Initialisation    ####################################
-####################################################################################
-####################################################################################
-
-fileName <- paste("data/ParsedSitemapActu-", Sys.Date()-1, ".csv", sep = "")
-parsedSitemapActu <- read.csv(fileName)
-#todo : get info from DB
 
 
 ####################################################################################
@@ -54,11 +46,23 @@ f_buildCommentURL<- function(ID, pageID){
     return(output)
 }
 
+
+f_buildEmptyOutput <- function(){
+    output <- data.frame(
+        commentID = as.character(),
+        userID = as.character(), 
+        comment = as.character(), 
+        parentComment = as.character(), 
+        dateComment = as.character(),
+        isJournaliste = as.character(),
+        hasChild = as.character(),
+        sentiment = as.integer(),
+        stringsAsFactors = FALSE
+    )
+    return(output)
+}
+
 f_parseCommentContentNode <- function(node, parentID){
-    #node <- curNode
-    # node <- xml_child(nodeAnswer,3)
-    #parentID <- 0
-    
     #comment ID 
     commentID <- xml_attr(node, "class")
     commentID <-strsplit(commentID, split= " ")[[1]][2]
@@ -79,6 +83,9 @@ f_parseCommentContentNode <- function(node, parentID){
     #comment 
     nodeComment <- xml_child(nodeCommentContent, 2)
     comment <- xml_text(nodeComment)
+
+    #sentiment 
+    sentiment <- get_sentiment(as.character(comment), method="nrc", lang = "french")
     
     #date comment 
     nodeDate <- xml_child(nodeCommentContent, 3)
@@ -88,19 +95,10 @@ f_parseCommentContentNode <- function(node, parentID){
     hasChild <- ifelse(xml_length(node) == 3, TRUE, FALSE)
 
     #
-    output <- data.frame(
-        commentID = as.character(),
-        userID = as.character(), 
-        comment = as.character(), 
-        parentComment = as.character(), 
-        dateComment = as.character(),
-        isJournaliste = as.character(),
-        hasChild = as.character(),
-        stringsAsFactors = FALSE
-    )
+    output <-f_buildEmptyOutput()
     
     output <- rbind(output, 
-                    setNames(data.frame(commentID, userID, comment, parentID, dateComment, isJournaliste, hasChild),
+                    setNames(data.frame(commentID, userID, comment, parentID, dateComment, isJournaliste, hasChild, sentiment),
                              names(output)))
     
     if (xml_length(node) == 3){
@@ -117,23 +115,11 @@ f_parseCommentContentNode <- function(node, parentID){
 }
 
 f_parseJsonComments <- function (jsonNode){
-    #jsonNode <- fromJSON(file = "data/Comment.json")[[2]]
-    #jsonNode <- data[[2]]
-    
     html <- read_html(jsonNode)
     nodes <- xml_child(html)
     nodes <- xml_children(nodes)
 
-    output <- data.frame(
-        commentID = as.character(),
-        userID = as.character(), 
-        comment = as.character(), 
-        parentComment = as.character(), 
-        dateComment = as.character(),
-        isJournaliste = as.character(),
-        hasChild = as.character(),
-        stringsAsFactors = FALSE
-    )
+    output <- f_buildEmptyOutput()
     
     for(i in 1:length(nodes)){
         curNode <- nodes[[i]]
@@ -144,27 +130,15 @@ f_parseJsonComments <- function (jsonNode){
 }
 
 f_getComments<- function(ID){
-    # ID <- "20180607ARTFIG00353"
-    #ID <- articleID
     url <- f_buildCommentURL(ID, 0)
     
     #todo read json online 
     data <- fromJSON(file = url)
-    #data <- fromJSON(file = "data/Comment.json")   
  
     if(data[[1]] == "empty_comment")
         return(NULL)
      
-    output <- data.frame(
-        commentID = as.character(),
-        userID = as.character(), 
-        comment = as.character(), 
-        parentComment = as.character(), 
-        dateComment = as.character(),
-        isJournaliste = as.character(),
-        hasChild = as.character(),
-        stringsAsFactors = FALSE
-    )
+    output <- f_buildEmptyOutput()
     
     cpt <- 1
     while(data[["is_last_page"]] == FALSE){
@@ -191,61 +165,52 @@ f_getComments<- function(ID){
 ############################  Initialisation    ####################################
 ####################################################################################
 ####################################################################################
-fileName <- paste("data/comments-", Sys.Date()-1, ".csv", sep = "")
 
 
-output <- data.frame(
-    commentID = as.character(),
-    userID = as.character(), 
-    comment = as.character(), 
-    parentComment = as.character(), 
-    dateComment = as.character(),
-    article = as.character(),
-    hasChild = as.character(),
-    stringsAsFactors = FALSE
-)
-
-
-connect <- odbcConnect("FiCrawl")
-query <-   "SELECT articleID FROM articles 
-            WHERE 
-                publicationdate < DATE_ADD(NOW(), INTERVAL -7 DAY) AND
-                HasBeenParsed = 0" 
-ArticlesIDList <- sqlQuery(connect, query, errors = TRUE )$articleID
-
-
-
-start_time <- Sys.time()
-for (i in 1:length(ArticlesIDList)){
-    articleID <-  ArticlesIDList[i]
-#    articleID <- "20180607ARTFIG00353"
-    output <- rbind(output, 
-                    f_getComments(articleID))
-    print(i)
+f_downloadAndParseComment <- function(){
+    output <- f_buildEmptyOutput()
     
-    query <- paste(
-        'UPDATE  articles set HasBeenParsed = 1 where articleID = ',
-        '"', articleID,'"',         
-        sep = '')
-    exitValue <- sqlQuery(connect, query, errors = TRUE )
-    if (!identical(exitValue, character(0))){
-        f_insertError(query, exitValue, 0, i)
-    } 
+    connect <- odbcConnect("FiCrawl")
+    query <-   "SELECT articleID FROM articles 
+                WHERE 
+                    publicationdate < DATE_ADD(NOW(), INTERVAL -7 DAY) AND
+                    HasBeenParsed = 0" 
+    ArticlesIDList <- sqlQuery(connect, query, errors = TRUE )$articleID
+
     
+    start_time <- Sys.time()
+    for (i in 1:length(ArticlesIDList)){
+        articleID <-  ArticlesIDList[i]
+    #    articleID <- "20180503ARTFIG00311"
+        output <- rbind(output, 
+                        f_getComments(articleID))
+        print(i)
+        
+        query <- paste(
+            'UPDATE  articles set HasBeenParsed = 1 where articleID = ',
+            '"', articleID,'"',         
+            sep = '')
+        exitValue <- sqlQuery(connect, query, errors = TRUE )
+        if (!identical(exitValue, character(0))){
+            f_insertError(query, exitValue, 0, i)
+        } 
+        
+        
+        Sys.sleep(10)
+    }
+    end_time <- Sys.time()
+    end_time - start_time
     
-    Sys.sleep(10)
+    close(connect)
+    return(output)
+
 }
-end_time <- Sys.time()
-end_time - start_time
-
-close(connect)
 
 
 
-
+output <- f_downloadAndParseComment()
+fileName <- paste("data/comments-", Sys.Date()-1, ".csv", sep = "")
 write.csv(output, fileName)
-
-
 
 
 
@@ -257,9 +222,6 @@ write.csv(output, fileName)
 ############################  Update DB ############################################
 ####################################################################################
 ####################################################################################
-
-#output <- read.csv("data/comments-2018-06-18.csv")
-#output$hasChild <- FALSE
 
 
 
@@ -283,11 +245,10 @@ f_updateUsers <- function(output){
 }
 
 f_updateComments <- function(output){
-    i<-401
     for (i in 1:nrow(output)){
         query <- paste(
             'insert into  comments (CommentId, Comment, CommentDate, 
-                IsJournaliste, HasChild, UserId, ArticleID, ParentCommentId) values (' , 
+                IsJournaliste, HasChild, UserId, ArticleID, ParentCommentId, sentiment) values (' , 
             '"', output$commentID[i],'",', 
             '"', gsub('"', '', output$comment[i]),'",', 
             '"', as.POSIXlt(output$dateComment[i], origin = "1970-01-01"), '",',
@@ -295,7 +256,8 @@ f_updateComments <- function(output){
             '"', ifelse(output$hasChild[i], 1, 0), '",',
             '"', output$userID[i],'",', 
             '"', output$article[i],'",', 
-            ifelse(output$parentComment[i] == 0, "NULL",paste('"',output$parentComment[i],'"', sep = "")), 
+            ifelse(output$parentComment[i] == 0, "NULL, ",paste('"',output$parentComment[i],'", ', sep = "")), 
+            output$sentiment[i],
             ')',
             sep = '')
         exitValue <- sqlQuery(connect, query, errors = TRUE )
