@@ -8,10 +8,12 @@
 # } 
 #install.packages("SnowballC")
 #install.packages("tm")
+#install.packages("odbc")
 library(xml2)
-library(RODBC)
+#library(RODBC)
 library(SnowballC)
 library(tm)
+library(odbc)
 
 setwd("C:/FiCrawl")
 
@@ -132,9 +134,22 @@ write.csv(parsedSitemapActu, fileName)
 
 
 f_insertError <- function(query, exitValue, id, i){
-    cat(paste(query, "\n"), file="SQLError_parseActu.txt", append = TRUE)
+#    cat(paste(query, "\n"), file="SQLError_parseActu.txt", append = TRUE)
     cat(paste(exitValue, "\n\n"), file="SQLError_parseActu.txt", append = TRUE)
     print(paste("ERROR ", id, " - ", i, sep = ""))
+}
+
+f_executeSelectQuery <- function(connect, query){
+    result <- dbSendQuery(connect, query)
+    output <- dbFetch(result)
+    dbClearResult(result)
+    return(output)
+    
+}
+
+f_executeDataManipulationQuery <- function(connect, query){
+    result <- dbSendStatement(connect, query)
+    dbClearResult(result)
 }
 
 f_cleanKeyword <- function(keyword){
@@ -163,7 +178,7 @@ f_cleanKeyword <- function(keyword){
 f_updateKeyword <- function(parsedSitemapActu, connect){
     keywords <- f_cleanKeyword(paste(parsedSitemapActu$keywords, collapse =","))
 
-    existingKeywords <- sqlQuery(connect, "select * from keywords")
+    existingKeywords <- f_executeSelectQuery(connect, "select * from keywords")
     existingKeywords <- existingKeywords[order(existingKeywords$KeywordID), ]
     '%nin%' <- Negate('%in%')
     keywords <- keywords[keywords$keywordStem %nin% existingKeywords$KeywordID, ]
@@ -175,10 +190,7 @@ f_updateKeyword <- function(parsedSitemapActu, connect){
                                '"', keywords$keyword[i],'"', 
                                ')', 
                                sep = '')
-                exitValue <- sqlQuery(connect, query)
-                if (!identical(exitValue, character(0))){
-                    f_insertError(query, exitValue, 1, i)              
-                }
+                f_executeDataManipulationQuery(connect, query)
             }
         }
     }
@@ -202,10 +214,7 @@ f_updateNewArticle <- function(newArticle, connect){
             '"', 0, '"', 
             ')',
             sep = '')
-        exitValue <- sqlQuery(connect, query, errors = TRUE )
-        if (!identical(exitValue, character(0))){
-            f_insertError(query, exitValue, 2, i)
-        }
+        f_executeDataManipulationQuery(connect, query)
         keywords <- f_cleanKeyword(newArticle$keywords[i])
         if (!is.null(keywords)){
             for (j in 1:nrow(keywords)){
@@ -216,10 +225,7 @@ f_updateNewArticle <- function(newArticle, connect){
                         '"', keywords$keywordStem[j], '"', 
                         ')',
                         sep = '')
-                    exitValue <- sqlQuery(connect, query)
-                    if (!identical(exitValue, character(0))){
-                        f_insertError(query, exitValue, 3, paste(i, j))
-                    }
+                    f_executeDataManipulationQuery(connect, query)
                 }
             }
             
@@ -241,16 +247,12 @@ f_updateExistingArticle <- function(exitingArticle, connect){
             "where articleID = ",
             '"', exitingArticle$ID[i],'"',         
             sep = '')
-        exitValue <- sqlQuery(connect, query, errors = TRUE )
-        if (!identical(exitValue, character(0)) & 
-            !identical(exitValue, "No Data")){
-            f_insertError(query, exitValue, 4, i)
-        } 
+        f_executeDataManipulationQuery(connect, query)
     }
 }
 
 f_updateArticle <- function(parsedSitemapActu, connect){
-    existingArticlesID <- sqlQuery(connect, "select articleID from articles")$articleID
+    existingArticlesID <- f_executeSelectQuery(connect, "select articleID from articles")$articleID
     '%nin%' <- Negate('%in%')
     newArticle <- parsedSitemapActu[parsedSitemapActu$ID %nin% existingArticlesID, ]
     exitingArticle <- parsedSitemapActu[parsedSitemapActu$ID %in% existingArticlesID, ]
@@ -258,19 +260,19 @@ f_updateArticle <- function(parsedSitemapActu, connect){
     f_updateExistingArticle(exitingArticle, connect)
 }
 
-#parsedSitemapActu <- read.csv("data/ParsedSitemapActu-2018-06-18.csv")
+#parsedSitemapActu <- read.csv("data/ParsedSitemapActu-2018-07-11.csv")
 
 f_updateDB <- function (parsedSitemapActu, connect){
-    connect <- odbcConnect("FiCrawl")
+    connect <- dbConnect(odbc::odbc(), "FiCrawl")
     f_updateKeyword(parsedSitemapActu, connect) 
     f_updateArticle(parsedSitemapActu, connect)
-    close(connect)
+    dbDisconnect(connect)
 }
 
 f_updateDB(parsedSitemapActu)
 
 
-f_parseDic(){
+f_parseDic <- function(){
     files <- list.files("./data")
     files <- files[grep("ParsedSitemapActu.*", files)]
     

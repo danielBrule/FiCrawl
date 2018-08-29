@@ -9,7 +9,8 @@ if (!require(rjson)){
 # }
 
 library(xml2)
-library(RODBC)
+#library(RODBC)
+library(odbc)
 library(syuzhet)
 
 setwd("C:/FiCrawl")
@@ -25,9 +26,29 @@ setwd("C:/FiCrawl")
 
 
 f_insertError <- function(query, exitValue, id, i){
-    cat(paste(query, "\n"), file="SQLError_parseComment.txt", append = TRUE)
+#    cat(paste(query, "\n"), file="SQLError_parseComment.txt", append = TRUE)
     cat(paste(exitValue, "\n\n"), file="SQLError_parseComment.txt", append = TRUE)
     print(paste("ERROR ", id, " - ", i, sep = ""))
+}
+
+f_executeSelectQuery <- function(connect, query){
+    result <- dbSendQuery(connect, query)
+    output <- dbFetch(result)
+    dbClearResult(result)
+    return(output)
+    
+}
+
+
+f_executeDataManipulationQuery <- function(connect, query){
+    result <-tryCatch({
+        res <- dbSendStatement(connect, query)
+        dbClearResult(res)
+        }, error = function(e) {
+            f_insertError(query, e, 0, 0)
+        })
+                      
+
 }
 
 ####################################################################################
@@ -170,38 +191,41 @@ f_getComments<- function(ID){
 f_downloadAndParseComment <- function(){
     output <- f_buildEmptyOutput()
     
-    connect <- odbcConnect("FiCrawl")
+    connect <- dbConnect(odbc::odbc(), "FiCrawl")
     query <-   "SELECT articleID FROM articles 
                 WHERE 
                     publicationdate < DATE_ADD(NOW(), INTERVAL -7 DAY) AND
                     HasBeenParsed = 0" 
-    ArticlesIDList <- sqlQuery(connect, query, errors = TRUE )$articleID
-
-    
+    ArticlesIDList <- f_executeSelectQuery(connect, query)$articleID
+    print(paste("nb of articles to crawl: ", length(ArticlesIDList)))
+    ArticlesIDList <- head(ArticlesIDList, n=500)
+    print(paste("nb of articles crawled: ", length(ArticlesIDList)))
     start_time <- Sys.time()
+    
     for (i in 1:length(ArticlesIDList)){
         articleID <-  ArticlesIDList[i]
     #    articleID <- "20180503ARTFIG00311"
+        print(paste ("gather", articleID, ":",i, "/",length(ArticlesIDList)))
         output <- rbind(output, 
                         f_getComments(articleID))
-        print(i)
-        
+        Sys.sleep(10)
+    }
+    
+    
+    for (i in 1:length(ArticlesIDList)){
+        articleID <-  ArticlesIDList[i]
+        print(paste ("update", articleID, ":",i, "/",length(ArticlesIDList)))
         query <- paste(
             'UPDATE  articles set HasBeenParsed = 1 where articleID = ',
             '"', articleID,'"',         
             sep = '')
-        exitValue <- sqlQuery(connect, query, errors = TRUE )
-        if (!identical(exitValue, character(0))){
-            f_insertError(query, exitValue, 0, i)
-        } 
-        
-        
-        Sys.sleep(10)
+        f_executeDataManipulationQuery(connect, query )
     }
+    
     end_time <- Sys.time()
     end_time - start_time
     
-    close(connect)
+    dbDisconnect(connect)
     return(output)
 
 }
@@ -212,7 +236,7 @@ output <- f_downloadAndParseComment()
 fileName <- paste("data/comments-", Sys.Date()-1, ".csv", sep = "")
 write.csv(output, fileName)
 
-
+#output <- read.csv("data/comments-2018-07-15.csv")
 
 
 
@@ -228,41 +252,47 @@ write.csv(output, fileName)
 f_updateUsers <- function(output){
     users <- sort(unique(output$userID))
     
-    existingUsers <- sort(sqlQuery(connect, "select * from users")$UserID)
+    existingUsers <- sort(f_executeSelectQuery(connect, "select * from users")$UserID)
     '%nin%' <- Negate('%in%')
     users <- users[users %nin% existingUsers]
-    if (length(users) > 1 ){
+    if (length(users) > 0 ){
         for (i in 1:length(users)){
             if (users[i] != "NA"){
                 query <- paste('insert into users (UserID) values ("' , users[i],'")', sep = '')
-                exitValue <- sqlQuery(connect, query)
-                if (!identical(exitValue, character(0))){
-                    f_insertError(query, exitValue, 1, i)              
-                }
+                f_executeDataManipulationQuery(connect, query)
             }
         }
     }
 }
 
 f_updateComments <- function(output){
-    for (i in 1:nrow(output)){
-        query <- paste(
-            'insert into  comments (CommentId, Comment, CommentDate, 
-                IsJournaliste, HasChild, UserId, ArticleID, ParentCommentId, sentiment) values (' , 
-            '"', output$commentID[i],'",', 
-            '"', gsub('"', '', output$comment[i]),'",', 
-            '"', as.POSIXlt(output$dateComment[i], origin = "1970-01-01"), '",',
-            '"', ifelse(output$isJournaliste[i], 1, 0), '",',
-            '"', ifelse(output$hasChild[i], 1, 0), '",',
-            '"', output$userID[i],'",', 
-            '"', output$article[i],'",', 
-            ifelse(output$parentComment[i] == 0, "NULL, ",paste('"',output$parentComment[i],'", ', sep = "")), 
-            output$sentiment[i],
-            ')',
-            sep = '')
-        exitValue <- sqlQuery(connect, query, errors = TRUE )
-        if (!identical(exitValue, character(0))){
-            f_insertError(query, exitValue, 2, i)
+    comments <- sort(unique(output$commentID))
+    
+    existingComments <- sort(f_executeSelectQuery(connect, "select CommentID from comments")$CommentID)
+    '%nin%' <- Negate('%in%')
+    comments <- comments[comments %nin% existingComments]
+    
+    
+    print(paste("total comments to update: ", length(comments), "/", nrow(output)))
+    if (length(comments) > 0 ){
+        for (i in 1:length(comments)){
+            data <- output[output$commentID == comments[i],]
+            print(paste("comment", comments[i], "#", i,"/",length(comments)))
+            query <- paste(
+                'insert into  comments (CommentId, Comment, CommentDate, 
+                    IsJournaliste, HasChild, UserId, ArticleID, ParentCommentId, sentiment) values (' , 
+                '"', data$commentID[1],'",', 
+                '"', gsub('"', '', data$comment[1]),'",', 
+                '"', as.POSIXlt(data$dateComment[1], origin = "1970-01-01"), '",',
+                '"', ifelse(data$isJournaliste[1], 1, 0), '",',
+                '"', ifelse(data$hasChild[1], 1, 0), '",',
+                '"', data$userID[1],'",', 
+                '"', data$article[1],'",', 
+                ifelse(data$parentComment[1] == 0, "NULL, ",paste('"',data$parentComment[1],'", ', sep = "")), 
+                data$sentiment[1],
+                ')',
+                sep = '')
+            f_executeDataManipulationQuery(connect, query)
         }
     }
 }
@@ -270,9 +300,9 @@ f_updateComments <- function(output){
 
 output <- unique(output)
 
-connect <- odbcConnect("FiCrawl")
+connect <-dbConnect(odbc::odbc(), "FiCrawl")
 f_updateUsers(output)
 f_updateComments(output)
 
 
-close(connect)
+dbDisconnect(connect)
